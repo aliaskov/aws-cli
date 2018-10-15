@@ -1,0 +1,42 @@
+#!/bin/bash
+env
+RDS_INSTANCE=rds01
+
+#Get information about the latest snapshot
+SNAPSHOT=`aws rds describe-db-snapshots --db-instance-identifier=${RDS_INSTANCE} --query="reverse(sort_by(DBSnapshots, &SnapshotCreateTime))[0]|DBSnapshotArn" --output text`
+NEW_RDS_INSTANCE=copy-${RDS_INSTANCE}
+INSTANCE_CLASS=db.r4.large
+SECURITY_GROUP=sg-b5bf21d8
+DB_PARAMETER_GROUP=mysql5-6pg
+SUBNET_GROUP=rdssubnetgroup
+date
+echo "Source RDS is ${RDS_INSTANCE}, will be restored to ${NEW_RDS_INSTANCE}, new DBinstance is ${INSTANCE_CLASS}, in subnet group ${SUBNET_GROUP}, from snapshot ${SNAPSHOT}"
+# restore
+aws rds restore-db-instance-from-db-snapshot \
+--db-instance-identifier ${NEW_RDS_INSTANCE} \
+--db-snapshot-identifier ${SNAPSHOT} \
+--db-instance-class ${INSTANCE_CLASS} --db-subnet-group-name ${SUBNET_GROUP} \
+--no-multi-az  --no-publicly-accessible --storage-type gp2
+
+aws rds wait db-instance-available --db-instance-identifier ${NEW_RDS_INSTANCE}
+
+aws rds \
+modify-db-instance \
+--db-instance-identifier ${NEW_RDS_INSTANCE} \
+--vpc-security-group-ids ${SECURITY_GROUP} \
+--db-parameter-group-name ${DB_PARAMETER_GROUP} \
+--backup-retention-period 0 \
+--apply-immediately
+
+aws rds reboot-db-instance \
+      --db-instance-identifier ${NEW_RDS_INSTANCE}
+
+aws rds wait db-instance-available --db-instance-identifier ${NEW_RDS_INSTANCE}
+
+#Get information of the source RDS Instance  be restored
+aws rds describe-db-instances --db-instance-identifier ${RDS_INSTANCE} > ${RDS_INSTANCE}.json
+# Get information on the restored DB Instance and compare with the source rds
+aws rds describe-db-instances --db-instance-identifier ${NEW_RDS_INSTANCE} > ${NEW_RDS_INSTANCE}.json
+diff ${RDS_INSTANCE}.json ${NEW_RDS_INSTANCE}.json
+echo "Finished at"
+date
